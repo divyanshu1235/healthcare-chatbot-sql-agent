@@ -1,0 +1,13 @@
+langchain
+langchain-together
+gradio
+python-dotenv==1.0.0
+PyPDF2
+chromadb
+faiss-cpu
+pdf2image
+pandas
+tabulate
+huggingface_hub
+transformers
+requests
