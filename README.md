@@ -1,3 +1,6 @@
+# healthcare-chatbot-sql-agent
+AI-powered healthcare chatbot developed during my ONGC internship. It connects a large language model with health datasets using a SQL agent to help users understand data and get insights on diseases and prevention.
+
 # 🏥 Healthcare Data Assistant
 
 A powerful AI-powered healthcare data analysis tool that combines SQL generation with conversational AI to help healthcare professionals and researchers query and understand medical data.
@@ -29,8 +32,8 @@ A powerful AI-powered healthcare data analysis tool that combines SQL generation
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/healthcare-data-assistant.git
-   cd healthcare-data-assistant
+   git clone https://github.com/divyanshu1235/healthcare-chatbot-sql-agent.git
+   cd healthcare-chatbot-sql-agent
    ```
 
 2. **Create virtual environment**
@@ -115,7 +118,7 @@ Have natural conversations about your data:
 ## 📁 Project Structure
 
 ```
-healthcare-data-assistant/
+healthcare-chatbot-sql-agent/
 ├── python.py                 # Main application
 ├── create_health_db.py       # Database creation script
 ├── requirements.txt          # Python dependencies
@@ -168,7 +171,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 If you encounter any issues or have questions:
 
-1. Check the [Issues](https://github.com/yourusername/healthcare-data-assistant/issues) page
+1. Check the [Issues](https://github.com/divyanshu1235/healthcare-chatbot-sql-agent/issues) page
 2. Create a new issue with detailed information
 3. Contact the maintainers
 
