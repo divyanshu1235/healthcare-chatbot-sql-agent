@@ -7,169 +7,143 @@ import gradio as gr
 from langchain_together import Together
 import pandas as pd
 import requests
-
-# Get Together API key
-together_api_key = os.getenv("TOGETHER_API_KEY")
-if not together_api_key:
-    raise ValueError("TOGETHER_API_KEY is not set in the .env file.")
+import re
 
 # Initialize Together AI model
 llm = Together(
     model="mistralai/Mixtral-8x7B-Instruct-v0.1",
     temperature=0.1,
     max_tokens=500,
-    together_api_key=together_api_key
+    together_api_key=os.getenv("TOGETHER_API_KEY")
 )
+
+# Example questions for the dropdown
+example_questions = [
+    "How many total diagnoses are there?",
+    "What are the top 10 most common diagnoses?",
+    "Show me all diagnoses for patient card number 12345",
+    "Give me the description about this id 327032",
+    "How many events are there in HIS_LOGS?",
+    "What are the different types of log events (RefType)?",
+    "Show me all events from DEHRADUN location",
+    "How many patients have been diagnosed with diabetes?",
+    "What is the earliest diagnosis date?",
+    "Show me the latest 5 diagnosis events",
+    "How many unique patients have been diagnosed?",
+    "What are the different locations in the system?",
+    "Show me all events from ONGC Hospital",
+    "How many events occurred in 2025?",
+    "What is hypertension?",
+    "List all diagnoses containing 'infection'",
+    "Show me events by doctor ID 93565",
+    "What are the different areas within locations?",
+    "How many events are there per location?",
+    "Show me diagnosis and log data for the same ID"
+]
 
 # SQL generation prompt
 sql_prompt = """
 You are an expert in converting English questions to SQL queries for a healthcare database.
 
-The database has two tables:
-
-Table: DIAGNOSIS
-- Id (integer): Primary key. Unique identifier for each diagnosis event.
-- CardNumber (integer): Patient's card number.
-- DiagnosisDate (text, format: DD/MM/YYYY HH:MM): Date and time of diagnosis.
-- Diagnosis (text): Diagnosis description.
-
-Table: HIS_LOGS
-- Id (integer): Primary key. Unique identifier for each log event.
-- RefType (text): Reference type (e.g., type of event).
-- DoctorId (integer): Doctor's ID.
-- RefDateTime (text, format: DD/MM/YYYY HH:MM): Date and time of the event.
-- LocationName (text): Name of the location.
-- LocationAreaName (text): Area within the location.
-- CardNumber (text): Patient's card number (may have leading zeros).
+Tables:
+DIAGNOSIS: Id (PK), CardNumber, DiagnosisDate, Diagnosis
+HIS_LOGS: Id (PK), RefType, DoctorId, RefDateTime, LocationName, LocationAreaName, CardNumber
 
 Guidelines:
-1. Use proper SQL syntax for SQLite.
-2. Use WHERE, GROUP BY, ORDER BY as needed.
-3. Use COUNT, DISTINCT, and date functions if asked.
-4. Join tables on Id (the primary key in both tables).
-5. Use LIKE for partial text matches if the question asks for "containing" or "includes".
-6. Return only the SQL query, no explanations or markdown.
+1. Use SQLite syntax
+2. Join tables on Id when needed
+3. For ID lookups, check both tables: SELECT 'DIAGNOSIS' as source, Id, CardNumber, DiagnosisDate, Diagnosis, NULL as RefType, NULL as DoctorId, NULL as RefDateTime, NULL as LocationName, NULL as LocationAreaName FROM DIAGNOSIS WHERE Id = [ID] UNION ALL SELECT 'HIS_LOGS' as source, Id, CardNumber, NULL as DiagnosisDate, NULL as Diagnosis, RefType, DoctorId, RefDateTime, LocationName, LocationAreaName FROM HIS_LOGS WHERE Id = [ID]
+4. Return only SQL query
 
 Examples:
-- Question: How many diagnoses are there?
-  SQL: SELECT COUNT(*) FROM DIAGNOSIS;
-
-- Question: List all unique diagnoses.
-  SQL: SELECT DISTINCT Diagnosis FROM DIAGNOSIS;
-
-- Question: Show all diagnoses for Id 10.
-  SQL: SELECT * FROM DIAGNOSIS WHERE Id = 10;
-
-- Question: For each Id, show the diagnosis and the corresponding log event type.
-  SQL: SELECT d.Id, d.Diagnosis, h.RefType FROM DIAGNOSIS d JOIN HIS_LOGS h ON d.Id = h.Id;
+- "How many diagnoses?" → SELECT COUNT(*) FROM DIAGNOSIS;
+- "Show diagnosis for Id 10" → SELECT * FROM DIAGNOSIS WHERE Id = 10;
+- "Description about id 327032" → SELECT 'DIAGNOSIS' as source, Id, CardNumber, DiagnosisDate, Diagnosis, NULL as RefType, NULL as DoctorId, NULL as RefDateTime, NULL as LocationName, NULL as LocationAreaName FROM DIAGNOSIS WHERE Id = 327032 UNION ALL SELECT 'HIS_LOGS' as source, Id, CardNumber, NULL as DiagnosisDate, NULL as Diagnosis, RefType, DoctorId, RefDateTime, LocationName, LocationAreaName FROM HIS_LOGS WHERE Id = 327032;
 """
 
 chatbot_prompt = """
-You are a helpful healthcare data assistant. You have access to two tables:
+You are a healthcare data assistant. Tables: DIAGNOSIS (Id, CardNumber, DiagnosisDate, Diagnosis) and HIS_LOGS (Id, RefType, DoctorId, RefDateTime, LocationName, LocationAreaName, CardNumber).
 
-Table: DIAGNOSIS
-- Id (integer): Primary key. Unique identifier for each diagnosis event.
-- CardNumber (integer): Patient's card number.
-- DiagnosisDate (text, format: DD/MM/YYYY HH:MM): Date and time of diagnosis.
-- Diagnosis (text): Diagnosis description.
+Important: Not all IDs exist in both tables. Check both tables for ID lookups.
 
-Table: HIS_LOGS
-- Id (integer): Primary key. Unique identifier for each log event.
-- RefType (text): Reference type (e.g., type of event).
-- DoctorId (integer): Doctor's ID.
-- RefDateTime (text, format: DD/MM/YYYY HH:MM): Date and time of the event.
-- LocationName (text): Name of the location.
-- LocationAreaName (text): Area within the location.
-- CardNumber (text): Patient's card number (may have leading zeros).
-
-When a user asks a question, you:
-- Figure out what they want to know.
-- If needed, run an SQL query on the data.
-- Summarize the answer in clear, simple language.
-- Give context, trends, and explanations, not just numbers.
-- Use the conversation history to understand follow-up questions and context.
-- If the user asks about a medical term, explain it using external knowledge (e.g., Wikipedia).
+When answering:
+- Run SQL queries as needed
+- Summarize results clearly
+- Explain medical terms using external knowledge
+- If ID not found in one table, explain what type of record it is
 """
 
 def get_sql(question):
-    full_prompt = f"{sql_prompt}\n\nQuestion: {question}\nSQL:"
-    response = llm.invoke(full_prompt)
-    return response.strip()
-
-def format_results(rows, columns):
-    if not rows:
-        return "No results found."
-    df = pd.DataFrame(rows, columns=columns)
-    return df.to_markdown(index=False)
+    return llm.invoke(f"{sql_prompt}\n\nQuestion: {question}\nSQL:").strip()
 
 def fetch_medical_definition(term):
-    """Fetch a medical term definition from Wikipedia."""
     try:
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{term.replace(' ', '%20')}"
         resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get('extract')
-    except Exception:
-        pass
-    return None
+        return resp.json().get('extract') if resp.status_code == 200 else None
+    except:
+        return None
+
+def execute_query(sql_query):
+    conn = sqlite3.connect("health.db")
+    cur = conn.cursor()
+    cur.execute(sql_query)
+    columns = [desc[0] for desc in cur.description]
+    rows = cur.fetchall()
+    conn.close()
+    return rows, columns
 
 def chatbot_answer(question, history):
     sql_query = get_sql(question)
     try:
-        conn = sqlite3.connect("health.db")
-        cur = conn.cursor()
-        cur.execute(sql_query)
-        columns = [description[0] for description in cur.description]
-        rows = cur.fetchall()
-        conn.close()
+        rows, columns = execute_query(sql_query)
         
-        import re
+        # Check for medical term definition
         term_match = re.search(r'what is ([A-Za-z0-9\- ]+)', question, re.IGNORECASE)
-        definition = None
-        if term_match:
-            term = term_match.group(1).strip()
-            definition = fetch_medical_definition(term)
+        definition = fetch_medical_definition(term_match.group(1).strip()) if term_match else None
         
+        # Build response prompt
         chat_history = "\n".join([f"User: {h[0]}\nAssistant: {h[1]}" for h in history])
-        summary_prompt = f"{chatbot_prompt}\n\nConversation so far:\n{chat_history}\n\nUser Question: {question}\n\n"
+        summary_prompt = f"{chatbot_prompt}\n\nConversation: {chat_history}\n\nQuestion: {question}\n\n"
         if definition:
-            summary_prompt += f"Medical definition for '{term}': {definition}\n\n"
-        summary_prompt += f"SQL Query Used: {sql_query}\n\nSQL Results (first 10 rows):\n{pd.DataFrame(rows, columns=columns).head(10).to_markdown(index=False) if rows else 'No results.'}\n\nNow, answer the user's question in clear, simple language, summarizing the results."
-        answer = llm.invoke(summary_prompt)
-        return answer.strip()
+            summary_prompt += f"Medical definition: {definition}\n\n"
+        summary_prompt += f"SQL: {sql_query}\n\nResults: {pd.DataFrame(rows, columns=columns).head(10).to_markdown(index=False) if rows else 'No results.'}\n\nAnswer:"
+        
+        return llm.invoke(summary_prompt).strip()
     except Exception as e:
-        return f"Sorry, I couldn't process your question due to an error: {e}"
+        return f"Error: {e}"
 
 def run_query(question):
     try:
         sql_query = get_sql(question)
-        conn = sqlite3.connect("health.db")
-        cur = conn.cursor()
-        cur.execute(sql_query)
-        columns = [description[0] for description in cur.description]
-        rows = cur.fetchall()
-        conn.close()
-        results = format_results(rows, columns)
-        return f"""### Generated SQL Query:\n```sql\n{sql_query}\n```\n\n### Results:\n{results}"""
+        rows, columns = execute_query(sql_query)
+        results = pd.DataFrame(rows, columns=columns).to_markdown(index=False) if rows else "No results found."
+        return f"### SQL Query:\n```sql\n{sql_query}\n```\n\n### Results:\n{results}"
     except Exception as e:
-        return f"""### Error:\nThere was an error processing your query:\n\n```python\n{str(e)}\n```\n\n### Generated SQL (if any):\n```sql\n{sql_query if 'sql_query' in locals() else 'No SQL generated'}\n```"""
+        return f"### Error:\n{str(e)}\n\n### SQL:\n{sql_query if 'sql_query' in locals() else 'No SQL generated'}"
 
+def select_example(evt: gr.SelectData):
+    return evt.value
+
+# Gradio Interface
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("""
-    # Healthcare Data Assistant (Powered by Together AI + Mixtral)
-    Choose a mode: SQL Agent (for SQL queries/results) or Chatbot (for easy-to-understand answers with memory and medical definitions).
-    """)
+    gr.Markdown("# Healthcare Data Assistant (Mixtral-8x7B)")
     mode = gr.Radio(["SQL Agent", "Chatbot"], value="SQL Agent", label="Mode")
     chatbot_state = gr.State([])
+    
     with gr.Row():
-        with gr.Column(scale=4):
-            question_input = gr.Textbox(
-                label="Your Question",
-                placeholder="Type your question here...",
-                lines=2
-            )
+        with gr.Column(scale=3):
+            question_input = gr.Textbox(label="Your Question", placeholder="Ask about healthcare data...", lines=2)
             submit_btn = gr.Button("Ask", variant="primary")
+        with gr.Column(scale=1):
+            gr.Markdown("### 💡 Example Questions")
+            example_dropdown = gr.Dropdown(
+                choices=example_questions,
+                label="Click to see examples",
+                interactive=True,
+                container=True
+            )
+    
     chatbox = gr.Chatbot(label="Conversation (Chatbot mode)")
     output = gr.Markdown(label="Results (SQL Agent mode)")
 
@@ -183,16 +157,10 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             history.append((question, answer))
             return history, history, None
 
-    submit_btn.click(
-        fn=answer_router,
-        inputs=[question_input, mode, chatbot_state],
-        outputs=[chatbot_state, chatbox, output]
-    )
-    question_input.submit(
-        fn=answer_router,
-        inputs=[question_input, mode, chatbot_state],
-        outputs=[chatbot_state, chatbox, output]
-    )
+    # Event handlers
+    submit_btn.click(fn=answer_router, inputs=[question_input, mode, chatbot_state], outputs=[chatbot_state, chatbox, output])
+    question_input.submit(fn=answer_router, inputs=[question_input, mode, chatbot_state], outputs=[chatbot_state, chatbox, output])
+    example_dropdown.select(fn=select_example, outputs=[question_input])
 
 if __name__ == "__main__":
     demo.launch(inbrowser=True)

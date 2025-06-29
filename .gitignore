@@ -1,7 +1,10 @@
-# Virtual Environment
-venv/
-env/
-ENV/
+# Environment variables
+.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
 
 # Python
 __pycache__/
@@ -24,13 +27,14 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Environment Variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
@@ -50,12 +54,10 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
 
-# Database files (optional - remove if you want to include the database)
-*.db
-*.sqlite
-*.sqlite3
+# Temporary files
+*.tmp
+*.temp
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -89,4 +91,10 @@ celerybeat.pid
 # mypy
 .mypy_cache/
 .dmypy.json
-dmypy.json 
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Dataset files (if large)
+dataset/*.csv 
